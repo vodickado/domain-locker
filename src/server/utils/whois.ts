@@ -21,19 +21,10 @@ let rdapBootstrapCache: Record<string, string> | null = null;
 export const getWhoisInfo = async (domain: string): Promise<WhoisResult | null> => {
   const trimmed = domain.replace(/^(?:https?:\/\/)?(?:www\.)?/i, '').trim();
 
-  const fallback = async (): Promise<WhoisResult | null> => {
+  const resolveWhoIs = async (): Promise<WhoisResult | null> => {
     const rdap = await tryRdapLookup(trimmed);
     if (rdap) return rdap;
 
-    if (WHOISXML_API_KEY) {
-      const xml = await tryWhoisXml(trimmed);
-      if (xml) return xml;
-    }
-
-    return {} as WhoisResult;
-  };
-
-  try {
     const WHOIS_TIMEOUT_MS = 8000;
     const raw = await Promise.race([
       whois(trimmed),
@@ -41,15 +32,25 @@ export const getWhoisInfo = async (domain: string): Promise<WhoisResult | null> 
         setTimeout(() => reject(new Error(`WHOIS timeout after ${WHOIS_TIMEOUT_MS}ms for ${domain}`)), WHOIS_TIMEOUT_MS)
       )
     ]);
+
     if (raw && typeof raw === 'object' && Object.keys(raw).length > 0) {
       log.success(`Got WHOIS data via whois-json for ${domain}`);
       return normalizeWhoisJson(raw);
     }
-    log.warn(`whois-json returned empty for ${domain}, falling back`);
-    return await fallback();
+
+    if (WHOISXML_API_KEY) {
+      const xml = await tryWhoisXml(trimmed);
+      if (xml) return xml;
+    }
+
+    log.warn(`whois returned empty for ${domain}`);
+    return {} as WhoisResult;
+  };
+
+  try {
+    return await resolveWhoIs();
   } catch (err) {
-    log.error(`whois-json failed for ${domain}: ${(err as Error).message}`);
-    return await fallback();
+    log.error(`whois failed for ${domain}: ${(err as Error).message}`);
   }
 };
 
